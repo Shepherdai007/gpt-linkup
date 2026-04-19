@@ -9747,6 +9747,52 @@ function _addShortcut() {
 }
 
 /* ══════════════════════════════════════════════════════
+   BLOCK LIST
+   Loads blocked user UIDs from Firestore into memory
+══════════════════════════════════════════════════════ */
+var _blockedUsers = [];
+
+function _loadBlockList() {
+  if (!ME || !ME.uid) return;
+  db.collection('users').doc(ME.uid).get().then(function(snap) {
+    if (!snap.exists) { _blockedUsers = []; return; }
+    _blockedUsers = snap.data().blockedUsers || [];
+    // Update settings label if visible
+    if (typeof _settingsUpdateBlockedLabel === 'function') {
+      _settingsUpdateBlockedLabel();
+    }
+  }).catch(function(e) {
+    console.warn('Failed to load block list:', e.message);
+    _blockedUsers = [];
+  });
+}
+
+function isBlocked(uid) {
+  return _blockedUsers.indexOf(uid) !== -1;
+}
+
+/* ══════════════════════════════════════════════════════
+   STARRED MESSAGES
+   Loads starred message IDs from Firestore
+══════════════════════════════════════════════════════ */
+var _starredMsgs = [];
+
+function _loadStarredMsgs() {
+  if (!ME || !ME.uid) return;
+  db.collection('users').doc(ME.uid).get().then(function(snap) {
+    if (!snap.exists) { _starredMsgs = []; return; }
+    _starredMsgs = snap.data().starredMessages || [];
+  }).catch(function(e) {
+    console.warn('Failed to load starred messages:', e.message);
+    _starredMsgs = [];
+  });
+}
+
+function isStarred(msgId) {
+  return _starredMsgs.indexOf(msgId) !== -1;
+}
+
+/* ══════════════════════════════════════════════════════
    CALL HISTORY
    Stored in localStorage — persists across sessions
    Records: callerId, callerName, receiverId, type,
@@ -10231,11 +10277,20 @@ function _initFCM() {
     if (_fcmMessaging) return;
     _fcmMessaging = firebase.messaging();
 
+    // Use our already-registered service worker for FCM
+    // This prevents Firebase from trying to register its own SW at /firebase-messaging-sw.js
+    var swPromise = _swReg
+      ? Promise.resolve(_swReg)
+      : navigator.serviceWorker.register('./firebase-messaging-sw.js');
+
+    swPromise.then(function(reg) {
+      _fcmMessaging.useServiceWorker(reg);
+    }).catch(function() {});
+
     // ── VAPID key from Firebase Console → Project Settings → Cloud Messaging
-    // Replace this with your actual VAPID key to enable true background push
     var VAPID_KEY = 'BIruXBJGhNY4wpQ78ofvG0paueXIEbNP4zndkmVksyuOXD-1_CDPWMy0Xx-BfsfN-u-163H3Btrlgx5YsDTQCgA';
 
-    var tokenOptions = { vapidKey: VAPID_KEY }; // VAPID key is set
+    var tokenOptions = { vapidKey: VAPID_KEY, serviceWorkerRegistration: _swReg || undefined };
 
     // Get the FCM registration token
     _fcmMessaging.getToken(tokenOptions).then(function(token) {
@@ -10273,16 +10328,17 @@ function _initFCM() {
       }
     });
 
-    // Listen for token refresh
-    _fcmMessaging.onTokenRefresh(function() {
+    // Periodically refresh token (onTokenRefresh was removed in Firebase v10+)
+    setInterval(function() {
+      if (!ME || !ME.uid) return;
       _fcmMessaging.getToken(tokenOptions).then(function(newToken) {
         if (!newToken || !ME) return;
         db.collection('users').doc(ME.uid).set(
           { fcmToken: newToken, fcmUpdated: firebase.firestore.FieldValue.serverTimestamp() },
           { merge: true }
         ).catch(function(){});
-      });
-    });
+      }).catch(function(){});
+    }, 3600000); // refresh every hour
 
   } catch(err) {
     console.warn('[FCM] Init error:', err.message);
@@ -14380,7 +14436,7 @@ const FIREBASE_CONFIG = {
 let db = null, auth = null, rtdb = null, currentUser = null;
 let firebaseReady = false;
 
-function  {
+function initFirebase() {
   try {
     firebase.initializeApp(FIREBASE_CONFIG);
     auth  = firebase.auth();
@@ -16696,7 +16752,7 @@ const FIREBASE_CONFIG = {
 let db = null, auth = null, rtdb = null, currentUser = null;
 let firebaseReady = false;
 
-function  {
+function initFirebase() {
   try {
     firebase.initializeApp(FIREBASE_CONFIG);
     auth  = firebase.auth();
