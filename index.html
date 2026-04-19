@@ -3589,7 +3589,7 @@ function _loadBlockList() {
     if (!snap.exists) return;
     var data = snap.data();
     _blockedUsers = Array.isArray(data.blockedUsers) ? data.blockedUsers : [];
-    _settingsUpdateBlockedLabel();
+    if (typeof _settingsUpdateBlockedLabel === 'function') _settingsUpdateBlockedLabel();
   }).catch(function(e) {
     console.warn('Block list load failed:', e.message);
   });
@@ -3673,6 +3673,8 @@ firebase.auth().onAuthStateChanged(function(u) {
     showAuth();
     cleanupListeners();
     clearInterval(_heartbeatTimer);
+    clearInterval(_fcmTokenRefreshTimer);
+    _fcmTokenRefreshTimer = null;
     clearTimeout(_inactiveTimer);
   }
 });
@@ -10198,6 +10200,7 @@ var _notifUnsubs   = [];    // Firestore unsub handles
 var _notifPermit   = false; // notification permission granted
 var _lastMsgTimes  = {};    // chatId → last msg timestamp (dedup)
 var _fcmMessaging  = null;  // Firebase Messaging instance
+var _fcmTokenRefreshTimer = null; // setInterval handle for FCM token refresh
 
 /* ─── STEP 1: Request permission + get FCM token ─── */
 function requestNotifPermission() {
@@ -10293,7 +10296,7 @@ function _initFCM() {
     });
 
     // Periodically refresh the FCM token (onTokenRefresh removed in Firebase v10+)
-    setInterval(function() {
+    _fcmTokenRefreshTimer = setInterval(function() {
       if (!ME || !ME.uid) return;
       _fcmMessaging.getToken(tokenOptions).then(function(newToken) {
         if (!newToken) return;
