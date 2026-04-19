@@ -43,7 +43,7 @@ self.addEventListener('notificationclick', function(event) {
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clients) {
       for (var i = 0; i < clients.length; i++) {
-        if (clients[i].url.indexOf('index.html') !== -1 || clients[i].visibilityState === 'visible') {
+        if (clients[i].url.indexOf('index.html') !== -1 || clients[i].url.endsWith('/gpt-linkup/')) {
           clients[i].focus();
           clients[i].postMessage(data);
           return;

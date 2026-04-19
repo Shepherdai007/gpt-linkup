@@ -66,9 +66,9 @@ self.addEventListener('notificationclick', function(event) {
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clients) {
-      // Focus existing window if found
+      // Focus existing LinkUp window if found (prioritize URL match)
       for (var i = 0; i < clients.length; i++) {
-        if (clients[i].visibilityState === 'visible' || clients[i].url.indexOf('index.html') !== -1) {
+        if (clients[i].url.indexOf('index.html') !== -1 || clients[i].url.endsWith('/gpt-linkup/')) {
           clients[i].focus();
           clients[i].postMessage(data);
           return;

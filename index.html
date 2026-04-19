@@ -10277,68 +10277,71 @@ function _initFCM() {
     if (_fcmMessaging) return;
     _fcmMessaging = firebase.messaging();
 
-    // Use our already-registered service worker for FCM
-    // This prevents Firebase from trying to register its own SW at /firebase-messaging-sw.js
+    // ── VAPID key from Firebase Console → Project Settings → Cloud Messaging
+    var VAPID_KEY = 'BIruXBJGhNY4wpQ78ofvG0paueXIEbNP4zndkmVksyuOXD-1_CDPWMy0Xx-BfsfN-u-163H3Btrlgx5YsDTQCgA';
+
+    // Register or reuse the service worker for FCM, then get token
     var swPromise = _swReg
       ? Promise.resolve(_swReg)
       : navigator.serviceWorker.register('./firebase-messaging-sw.js');
 
     swPromise.then(function(reg) {
+      _swReg = reg;
       _fcmMessaging.useServiceWorker(reg);
-    }).catch(function() {});
 
-    // ── VAPID key from Firebase Console → Project Settings → Cloud Messaging
-    var VAPID_KEY = 'BIruXBJGhNY4wpQ78ofvG0paueXIEbNP4zndkmVksyuOXD-1_CDPWMy0Xx-BfsfN-u-163H3Btrlgx5YsDTQCgA';
+      var tokenOptions = { vapidKey: VAPID_KEY, serviceWorkerRegistration: reg };
 
-    var tokenOptions = { vapidKey: VAPID_KEY, serviceWorkerRegistration: _swReg || undefined };
+      // Get the FCM registration token
+      _fcmMessaging.getToken(tokenOptions).then(function(token) {
+        if (!token) { console.log('[FCM] No token received.'); return; }
+        console.log('[FCM] Token obtained:', token.substring(0, 20) + '…');
 
-    // Get the FCM registration token
-    _fcmMessaging.getToken(tokenOptions).then(function(token) {
-      if (!token) { console.log('[FCM] No token received.'); return; }
-      console.log('[FCM] Token obtained:', token.substring(0, 20) + '…');
+        // Save token to user's Firestore doc
+        db.collection('users').doc(ME.uid).set(
+          { fcmToken: token, fcmUpdated: firebase.firestore.FieldValue.serverTimestamp() },
+          { merge: true }
+        ).catch(function(e) { console.warn('[FCM] Token save failed:', e.message); });
 
-      // Save token to user's Firestore doc
-      db.collection('users').doc(ME.uid).set(
-        { fcmToken: token, fcmUpdated: firebase.firestore.FieldValue.serverTimestamp() },
-        { merge: true }
-      ).catch(function(e) { console.warn('[FCM] Token save failed:', e.message); });
+      }).catch(function(err) {
+        // This happens if VAPID key is missing/wrong — fallback to Firestore listeners only
+        console.log('[FCM] getToken failed (VAPID key needed for background push):', err.message);
+      });
+
+      // Handle foreground messages (app is open)
+      _fcmMessaging.onMessage(function(payload) {
+        console.log('[FCM] Foreground message:', payload);
+        var data = payload.data || {};
+        if (data.type === 'call') {
+          // Show incoming call UI directly if app is open
+          if (data.callId && data.callerId && ME && data.callerId !== ME.uid) {
+            _showIncomingCallUI(
+              data.callId,
+              data.callerId,
+              data.callerName || 'Someone',
+              data.callType   || 'audio'
+            );
+          }
+        } else {
+          var notif = payload.notification || {};
+          toast('New message: ' + (notif.body || data.body || ''), 'info');
+        }
+      });
+
+      // Periodically refresh token (onTokenRefresh was removed in Firebase v10+)
+      setInterval(function() {
+        if (!ME || !ME.uid) return;
+        _fcmMessaging.getToken(tokenOptions).then(function(newToken) {
+          if (!newToken || !ME) return;
+          db.collection('users').doc(ME.uid).set(
+            { fcmToken: newToken, fcmUpdated: firebase.firestore.FieldValue.serverTimestamp() },
+            { merge: true }
+          ).catch(function(){});
+        }).catch(function(){});
+      }, 3600000); // refresh every hour
 
     }).catch(function(err) {
-      // This happens if VAPID key is missing/wrong — fallback to Firestore listeners only
-      console.log('[FCM] getToken failed (VAPID key needed for background push):', err.message);
+      console.warn('[FCM] SW registration failed:', err.message);
     });
-
-    // Handle foreground messages (app is open)
-    _fcmMessaging.onMessage(function(payload) {
-      console.log('[FCM] Foreground message:', payload);
-      var data = payload.data || {};
-      if (data.type === 'call') {
-        // Show incoming call UI directly if app is open
-        if (data.callId && data.callerId && ME && data.callerId !== ME.uid) {
-          _showIncomingCallUI(
-            data.callId,
-            data.callerId,
-            data.callerName || 'Someone',
-            data.callType   || 'audio'
-          );
-        }
-      } else {
-        var notif = payload.notification || {};
-        toast('New message: ' + (notif.body || data.body || ''), 'info');
-      }
-    });
-
-    // Periodically refresh token (onTokenRefresh was removed in Firebase v10+)
-    setInterval(function() {
-      if (!ME || !ME.uid) return;
-      _fcmMessaging.getToken(tokenOptions).then(function(newToken) {
-        if (!newToken || !ME) return;
-        db.collection('users').doc(ME.uid).set(
-          { fcmToken: newToken, fcmUpdated: firebase.firestore.FieldValue.serverTimestamp() },
-          { merge: true }
-        ).catch(function(){});
-      }).catch(function(){});
-    }, 3600000); // refresh every hour
 
   } catch(err) {
     console.warn('[FCM] Init error:', err.message);
