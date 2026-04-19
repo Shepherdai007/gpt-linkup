@@ -3580,6 +3580,25 @@ var _userCache  = {};  // uid → user data
 var _allUsers   = [];  // ordered user array
 var _firstUsers = true;
 
+// Block list — array of blocked UIDs, loaded from Firestore
+var _blockedUsers = [];
+
+function _loadBlockList() {
+  if (!ME || !ME.uid) return;
+  db.collection('users').doc(ME.uid).get().then(function(snap) {
+    if (!snap.exists) return;
+    var data = snap.data();
+    _blockedUsers = Array.isArray(data.blockedUsers) ? data.blockedUsers : [];
+    _settingsUpdateBlockedLabel();
+  }).catch(function(e) {
+    console.warn('Block list load failed:', e.message);
+  });
+}
+
+function isBlocked(uid) {
+  return _blockedUsers.indexOf(uid) !== -1;
+}
+
 // Message dedup
 var _knownMsgIds = {};
 
@@ -10273,16 +10292,17 @@ function _initFCM() {
       }
     });
 
-    // Listen for token refresh
-    _fcmMessaging.onTokenRefresh(function() {
+    // Periodically refresh the FCM token (onTokenRefresh removed in Firebase v10+)
+    setInterval(function() {
+      if (!ME || !ME.uid) return;
       _fcmMessaging.getToken(tokenOptions).then(function(newToken) {
-        if (!newToken || !ME) return;
+        if (!newToken) return;
         db.collection('users').doc(ME.uid).set(
           { fcmToken: newToken, fcmUpdated: firebase.firestore.FieldValue.serverTimestamp() },
           { merge: true }
         ).catch(function(){});
-      });
-    });
+      }).catch(function(){});
+    }, 60 * 60 * 1000); // refresh every hour
 
   } catch(err) {
     console.warn('[FCM] Init error:', err.message);
@@ -14380,7 +14400,7 @@ const FIREBASE_CONFIG = {
 let db = null, auth = null, rtdb = null, currentUser = null;
 let firebaseReady = false;
 
-function  {
+function initFirebase() {
   try {
     firebase.initializeApp(FIREBASE_CONFIG);
     auth  = firebase.auth();
@@ -16696,7 +16716,7 @@ const FIREBASE_CONFIG = {
 let db = null, auth = null, rtdb = null, currentUser = null;
 let firebaseReady = false;
 
-function  {
+function initFirebase() {
   try {
     firebase.initializeApp(FIREBASE_CONFIG);
     auth  = firebase.auth();
